@@ -146,10 +146,8 @@ namespace Microsoft.Practices.Unity.InterceptionExtension.Tests
 
             IUnityContainer container = CreateContainer("CanCreateWrappedObjectOverInterface");
             container
-                .RegisterType<Interface, WrappableThroughInterface>()
-                .RegisterType<Interface>(
-                    new Interceptor<InterfaceInterceptor>(),
-                    new InterceptionBehavior<PolicyInjectionBehavior>());
+                .RegisterType<Interface, WrappableThroughInterface>(new Interceptor<InterfaceInterceptor>(),
+                                                                    new InterceptionBehavior<PolicyInjectionBehavior>());
 
             Interface wrappedOverInterface = container.Resolve<Interface>();
             wrappedOverInterface.Method();
@@ -164,17 +162,16 @@ namespace Microsoft.Practices.Unity.InterceptionExtension.Tests
 
             IUnityContainer container = CreateContainer("CanCreateWrappedObjectOverInterface");
             container
-                .RegisterType<Interface, WrappableThroughInterface>(new ContainerControlledLifetimeManager())
-                .RegisterType<Interface>(
-                    new Interceptor<InterfaceInterceptor>(),
-                    new InterceptionBehavior<PolicyInjectionBehavior>());
+                .RegisterType<Interface, WrappableThroughInterface>(new ContainerControlledLifetimeManager(),
+                                                                    new Interceptor<InterfaceInterceptor>(),
+                                                                    new InterceptionBehavior<PolicyInjectionBehavior>());
 
             Interface wrappedOverInterface = container.Resolve<Interface>();
             wrappedOverInterface.Method();
-            WrappableThroughInterface wrapped = container.Resolve<WrappableThroughInterface>();
+            Interface wrapped = container.Resolve<Interface>();
             wrapped.Method();
 
-            Assert.AreEqual(1, GlobalCountCallHandler.Calls["CanCreateWrappedObjectOverInterface"]);
+            Assert.AreEqual(2, GlobalCountCallHandler.Calls["CanCreateWrappedObjectOverInterface"]);
         }
 
         [TestMethod]
@@ -234,10 +231,8 @@ namespace Microsoft.Practices.Unity.InterceptionExtension.Tests
             GlobalCountCallHandler.Calls.Clear();
 
             IUnityContainer container = CreateContainer("CanInterceptCallFromBaseOfWrappedInterface");
-            container.RegisterType<Interface, WrappableThroughInterface>()
-                .RegisterType<Interface>(
-                    new Interceptor<InterfaceInterceptor>(),
-                    new InterceptionBehavior<PolicyInjectionBehavior>());
+            container.RegisterType<Interface, WrappableThroughInterface>(new Interceptor<InterfaceInterceptor>(),
+                                                                         new InterceptionBehavior<PolicyInjectionBehavior>());
 
             Interface wrappedOverInterface = container.Resolve<Interface>();
             wrappedOverInterface.Method3();

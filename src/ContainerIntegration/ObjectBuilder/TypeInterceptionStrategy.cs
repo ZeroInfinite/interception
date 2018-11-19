@@ -1,6 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved. See License.txt in the project root for license information.
-
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -9,18 +7,24 @@ using Unity.Builder.Selection;
 using Unity.Builder.Strategy;
 using Unity.Interception.InterceptionBehaviors;
 using Unity.Interception.Interceptors;
+using Unity.Interception.Interceptors.TypeInterceptors.VirtualMethodInterception;
+using Unity.Lifetime;
 using Unity.Policy;
+using Unity.Registration;
+using Unity.Strategy;
 
 namespace Unity.Interception.ContainerIntegration.ObjectBuilder
 {
     /// <summary>
-    /// A <see cref="IBuilderStrategy"/> that hooks up type interception. It looks for
+    /// A <see cref="BuilderStrategy"/> that hooks up type interception. It looks for
     /// a <see cref="ITypeInterceptionPolicy"/> for the current build key, or the current
     /// build type. If present, it substitutes types so that that proxy class gets
     /// built up instead. On the way back, it hooks up the appropriate handlers.
     /// </summary>
     public class TypeInterceptionStrategy : BuilderStrategy
     {
+        #region BuilderStrategy
+
         /// <summary>
         /// Called during the chain of responsibility for a build operation. The
         /// PreBuildUp method is called when the chain is being executed in the
@@ -31,7 +35,7 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
         /// <param name="context">Context of the build operation.</param>
         public override void PreBuildUp(IBuilderContext context)
         {
-            if ((context ?? throw new ArgumentNullException(nameof(context))).Existing != null)
+            if (context.Existing != null)
             {
                 return;
             }
@@ -68,9 +72,8 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
                 additionalInterfacesPolicy != null ? additionalInterfacesPolicy.AdditionalInterfaces : Type.EmptyTypes;
 
             var enumerable = interceptionBehaviors as IInterceptionBehavior[] ?? interceptionBehaviors.ToArray();
-            context.Policies.Set(
-                new EffectiveInterceptionBehaviorsPolicy { Behaviors = enumerable },
-                context.BuildKey);
+            context.Registration.Set(typeof(EffectiveInterceptionBehaviorsPolicy), 
+                new EffectiveInterceptionBehaviorsPolicy { Behaviors = enumerable });
 
             Type[] allAdditionalInterfaces =
                 Intercept.GetAllAdditionalInterfaces(enumerable, additionalInterfaces);
@@ -89,16 +92,21 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
         /// <remarks>In this class, PostBuildUp checks to see if the object was proxyable,
         /// and if it was, wires up the handlers.</remarks>
         /// <param name="context">Context of the build operation.</param>
+        /// <param name="pre"></param>
         public override void PostBuildUp(IBuilderContext context)
         {
-            IInterceptingProxy proxy = (context ?? throw new ArgumentNullException(nameof(context))).Existing as IInterceptingProxy;
+            IInterceptingProxy proxy = context.Existing as IInterceptingProxy;
+
             if (proxy == null)
             {
                 return;
             }
 
-            EffectiveInterceptionBehaviorsPolicy effectiveInterceptionBehaviorsPolicy =
-                context.Policies.GetNoDefault<EffectiveInterceptionBehaviorsPolicy>(context.BuildKey);
+            var effectiveInterceptionBehaviorsPolicy =
+                (EffectiveInterceptionBehaviorsPolicy)context.Policies
+                                                             .Get(context.OriginalBuildKey.Type, 
+                                                                  context.OriginalBuildKey.Name, 
+                                               typeof(EffectiveInterceptionBehaviorsPolicy), out _);
             if (effectiveInterceptionBehaviorsPolicy == null)
             {
                 return;
@@ -110,12 +118,38 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
             }
         }
 
+
         private static TPolicy FindInterceptionPolicy<TPolicy>(IBuilderContext context)
             where TPolicy : class, IBuilderPolicy
         {
-            return context.Policies.Get<TPolicy>(context.BuildKey) ??
-                context.Policies.Get<TPolicy>(context.BuildKey.Type);
+            return (TPolicy)context.Policies.GetOrDefault(typeof(TPolicy), context.OriginalBuildKey, out _) ??
+                   (TPolicy)context.Policies.GetOrDefault(typeof(TPolicy), context.OriginalBuildKey.Type, out _);
         }
+
+        #endregion
+
+
+        #region IRegisterTypeStrategy
+
+        //public void RegisterType(IContainerContext context, Type typeFrom, Type typeTo, string name, 
+        //                         LifetimeManager lifetimeManager, params InjectionMember[] injectionMembers)
+        //{
+        //    Type typeToBuild = typeFrom ?? typeTo;
+
+        //    var policy = (ITypeInterceptionPolicy)(context.Policies.Get(typeToBuild, name, typeof(ITypeInterceptionPolicy), out _) ??
+        //                                           context.Policies.Get(typeToBuild, string.Empty, typeof(ITypeInterceptionPolicy), out _));
+        //    if (policy == null) return;
+
+        //    var interceptor = policy.GetInterceptor(context.Container);
+        //    if (typeof(VirtualMethodInterceptor) == interceptor?.GetType())
+        //        context.Policies.Set(typeToBuild, name, typeof(IBuildPlanPolicy), new OverriddenBuildPlanMarkerPolicy());
+        //}
+
+        #endregion
+
+
+        #region Nested Types
+
 
         private class EffectiveInterceptionBehaviorsPolicy : IBuilderPolicy
         {
@@ -129,10 +163,10 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
 
         private class DerivedTypeConstructorSelectorPolicy : IConstructorSelectorPolicy
         {
-            private readonly Type _interceptingType;
-            private readonly IConstructorSelectorPolicy _originalConstructorSelectorPolicy;
+            internal readonly Type _interceptingType;
+            internal readonly IConstructorSelectorPolicy _originalConstructorSelectorPolicy;
 
-            private DerivedTypeConstructorSelectorPolicy(
+            internal DerivedTypeConstructorSelectorPolicy(
                 Type interceptingType,
                 IConstructorSelectorPolicy originalConstructorSelectorPolicy)
             {
@@ -157,7 +191,7 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
 
                 SelectedConstructor newConstructor = new SelectedConstructor(newConstructorInfo);
 
-                foreach (IDependencyResolverPolicy resolver in originalConstructor.GetParameterResolvers())
+                foreach (IResolverPolicy resolver in originalConstructor.GetParameterResolvers())
                 {
                     newConstructor.AddParameterResolver(resolver);
                 }
@@ -167,27 +201,26 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
 
             public static void SetPolicyForInterceptingType(IBuilderContext context, Type interceptingType)
             {
-                IPolicyList selectorPolicyDestination;
-                var currentSelectorPolicy = context.Policies.Get<IConstructorSelectorPolicy>(context.BuildKey, out selectorPolicyDestination);
-                var currentDerivedTypeSelectorPolicy = currentSelectorPolicy as DerivedTypeConstructorSelectorPolicy;
-
-                if (currentDerivedTypeSelectorPolicy == null)
+                var currentSelectorPolicy =
+                    (IConstructorSelectorPolicy)context.Policies.GetOrDefault(typeof(IConstructorSelectorPolicy),
+                                                                              context.OriginalBuildKey,
+                                                                              out var selectorPolicyDestination);
+                if (!(currentSelectorPolicy is DerivedTypeConstructorSelectorPolicy currentDerivedTypeSelectorPolicy))
                 {
-                    selectorPolicyDestination.Set<IConstructorSelectorPolicy>(
-                        new DerivedTypeConstructorSelectorPolicy(
-                            interceptingType,
-                            currentSelectorPolicy),
-                        context.BuildKey);
+                    context.Registration.Set(typeof(IConstructorSelectorPolicy),
+                                                  new DerivedTypeConstructorSelectorPolicy(
+                                                      interceptingType, currentSelectorPolicy));
                 }
                 else if (currentDerivedTypeSelectorPolicy._interceptingType != interceptingType)
                 {
-                    selectorPolicyDestination.Set<IConstructorSelectorPolicy>(
-                        new DerivedTypeConstructorSelectorPolicy(
-                            interceptingType,
-                            currentDerivedTypeSelectorPolicy._originalConstructorSelectorPolicy),
-                        context.BuildKey);
+                    context.Registration.Set(typeof(IConstructorSelectorPolicy),
+                                                  new DerivedTypeConstructorSelectorPolicy(
+                                                      interceptingType,
+                                                      currentDerivedTypeSelectorPolicy._originalConstructorSelectorPolicy));
                 }
             }
         }
+
+        #endregion
     }
 }

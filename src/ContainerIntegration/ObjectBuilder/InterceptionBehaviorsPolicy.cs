@@ -32,21 +32,20 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
         /// This method will return a sequence of <see cref="IInterceptionBehavior"/>s. These behaviors will
         /// only be included if their <see cref="IInterceptionBehavior.WillExecute"/> properties are true.
         /// </remarks>
-        /// <param name="context">Context for the current build operation.</param>
+        /// <param name="container">Container context for the current build operation.</param>
         /// <param name="interceptor">Interceptor that will be used to invoke the behavior.</param>
         /// <param name="typeToIntercept">Type that interception was requested on.</param>
         /// <param name="implementationType">Type that implements the interception.</param>
         /// <returns></returns>
         public IEnumerable<IInterceptionBehavior> GetEffectiveBehaviors(
-            IBuilderContext context, IInterceptor interceptor, Type typeToIntercept, Type implementationType)
+            IUnityContainer container, IInterceptor interceptor, Type typeToIntercept, Type implementationType)
         {
             var interceptionRequest = new CurrentInterceptionRequest(interceptor, typeToIntercept, implementationType);
 
             foreach (var key in BehaviorKeys)
             {
-                var behavior = (IInterceptionBehavior)context.NewBuildUp(key,
-                    childContext => childContext.AddResolverOverrides(
-                        new DependencyOverride<CurrentInterceptionRequest>(interceptionRequest)));
+                var behavior = (IInterceptionBehavior)container.Resolve(key.Type, key.Name, 
+                    new DependencyOverride<CurrentInterceptionRequest>(interceptionRequest));
                 yield return behavior;
             }
         }
@@ -61,13 +60,12 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
             Type typeToCreate,
             string name)
         {
-            NamedTypeBuildKey key = new NamedTypeBuildKey(typeToCreate, name);
             IInterceptionBehaviorsPolicy policy =
-                policies.GetNoDefault<IInterceptionBehaviorsPolicy>(key);
-            if (policy == null || !(policy is InterceptionBehaviorsPolicy))
+                (IInterceptionBehaviorsPolicy)policies.Get(typeToCreate, name, typeof(IInterceptionBehaviorsPolicy), out _);
+            if (!(policy is InterceptionBehaviorsPolicy))
             {
                 policy = new InterceptionBehaviorsPolicy();
-                policies.Set(policy, key);
+                policies.Set(typeToCreate, name, typeof(IInterceptionBehaviorsPolicy), policy);
             }
             return (InterceptionBehaviorsPolicy)policy;
         }

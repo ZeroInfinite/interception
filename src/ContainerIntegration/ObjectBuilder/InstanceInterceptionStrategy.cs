@@ -12,7 +12,7 @@ using Unity.Policy;
 namespace Unity.Interception.ContainerIntegration.ObjectBuilder
 {
     /// <summary>
-    /// A <see cref="IBuilderStrategy"/> that intercepts objects
+    /// A <see cref="BuilderStrategy"/> that intercepts objects
     /// in the build chain by creating a proxy object.
     /// </summary>
     public class InstanceInterceptionStrategy : BuilderStrategy
@@ -23,6 +23,7 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
         /// phase and executes in reverse order from the PreBuildUp calls.
         /// </summary>
         /// <param name="context">Context of the build operation.</param>
+        /// <param name="pre"></param>
         public override void PostBuildUp(IBuilderContext context)
         {
             // If it's already been intercepted, don't do it again.
@@ -75,10 +76,9 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
         private static T FindInterceptionPolicy<T>(IBuilderContext context, bool probeOriginalKey)
             where T : class, IBuilderPolicy
         {
-            // First, try for a match against the current build key
-            Type currentType = context.BuildKey.Type;
-            var policy = context.Policies.Get<T>(context.BuildKey) ??
-                       context.Policies.Get<T>(currentType);
+            // First, try for an original build key
+            var policy = (T)context.Policies.GetOrDefault(typeof(T), context.OriginalBuildKey, out _) ??
+                         (T)context.Policies.GetOrDefault(typeof(T), context.OriginalBuildKey.Type, out _);
 
             if (policy != null)
             {
@@ -90,10 +90,9 @@ namespace Unity.Interception.ContainerIntegration.ObjectBuilder
                 return null;
             }
 
-            // Next, try the original build key
-            Type originalType = context.OriginalBuildKey.Type;
-            policy = context.Policies.Get<T>(context.OriginalBuildKey) ??
-                context.Policies.Get<T>(originalType);
+            // Next, try the build type
+            policy = (T)context.Policies.GetOrDefault(typeof(T), context.BuildKey, out _) ??
+                     (T)context.Policies.GetOrDefault(typeof(T), context.BuildKey.Type, out _);
 
             return policy;
         }

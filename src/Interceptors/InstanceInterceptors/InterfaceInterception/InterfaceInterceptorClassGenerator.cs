@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.IO;
 using System.Reflection;
 using System.Reflection.Emit;
 using Unity.Interception.Interceptors.TypeInterceptors.VirtualMethodInterception.InterceptingClassGeneration;
@@ -30,8 +31,20 @@ namespace Unity.Interception.Interceptors.InstanceInterceptors.InterfaceIntercep
 
         static InterfaceInterceptorClassGenerator()
         {
-            AssemblyBuilder = AppDomain.CurrentDomain.DefineDynamicAssembly(
-                new AssemblyName("Unity_ILEmit_InterfaceProxies"),
+            byte[] pair;
+
+            using (MemoryStream ms = new MemoryStream())
+            {
+                typeof(InterfaceInterceptorClassGenerator)
+                    .Assembly
+                    .GetManifestResourceStream("Unity.Interception.package.snk")
+                    .CopyTo(ms);
+
+                pair = ms.ToArray();
+            }
+
+            AssemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(
+                new AssemblyName("Unity_ILEmit_InterfaceProxies") { KeyPair = new StrongNameKeyPair(pair) },
 #if DEBUG_SAVE_GENERATED_ASSEMBLY
                 AssemblyBuilderAccess.RunAndSave);
 #else
@@ -116,7 +129,7 @@ namespace Unity.Interception.Interceptors.InstanceInterceptors.InterfaceIntercep
 
             AddConstructor();
 
-            Type result = _typeBuilder.CreateType();
+            Type result = _typeBuilder.CreateTypeInfo().AsType();
 #if DEBUG_SAVE_GENERATED_ASSEMBLY
             assemblyBuilder.Save("Unity_ILEmit_InterfaceProxies.dll");
 #endif
@@ -192,7 +205,8 @@ namespace Unity.Interception.Interceptors.InstanceInterceptors.InterfaceIntercep
 
             for (int i = 0; i < genericArguments.Length; ++i)
             {
-                genericTypes[i].SetGenericParameterAttributes(genericArguments[i].GenericParameterAttributes);
+                genericTypes[i].SetGenericParameterAttributes(
+                    genericArguments[i].GenericParameterAttributes & ~GenericParameterAttributes.VarianceMask);
                 var interfaceConstraints = new List<Type>();
                 foreach (Type constraint in genericArguments[i].GetGenericParameterConstraints())
                 {
